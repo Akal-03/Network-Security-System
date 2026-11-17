@@ -43,61 +43,114 @@ function App() {
     try {
       setError('')
 
-      const endpoints = [
-        'logs',
-        'alerts',
-        'dashboard',
-        'events'
-      ]
+      const fetchEndpoint = async (endpoint) => {
+        const response = await fetch(`${API}/${endpoint}`, {
+          headers: { Accept: 'application/json' }
+        })
 
-      const responses = await Promise.all(
-        endpoints.map(endpoint =>
-          fetch(`${API}/${endpoint}`)
-        )
-      )
+        if (!response.ok) {
+          throw new Error(
+            `${endpoint} API returned ${response.status}`
+          )
+        }
 
-      const failedResponse = responses.find(
-        response => !response.ok
-      )
-
-      if (failedResponse) {
-        throw new Error(
-          `API Error: ${failedResponse.status}`
-        )
+        return response.json()
       }
 
+      // Fetch APIs independently
       const [
-        logsData,
-        alertsData,
-        dashboardData,
-        eventsData
-      ] = await Promise.all(
-        responses.map(response => response.json())
-      )
+        logsResult,
+        alertsResult,
+        dashboardResult,
+        eventsResult
+      ] = await Promise.allSettled([
+        fetchEndpoint('logs'),
+        fetchEndpoint('alerts'),
+        fetchEndpoint('dashboard'),
+        fetchEndpoint('events')
+      ])
 
-      const getArray = (response) => {
-        if (Array.isArray(response)) return response
-        if (Array.isArray(response?.data)) return response.data
+      // Logs API is required
+      if (logsResult.status === 'rejected') {
+        throw logsResult.reason
+      }
+
+      const getArray = (result) => {
+        if (result.status !== 'fulfilled') return []
+
+        const value = result.value
+
+        if (Array.isArray(value)) return value
+        if (Array.isArray(value?.data)) return value.data
+        if (Array.isArray(value?.data?.data)) {
+          return value.data.data
+        }
+
         return []
       }
 
-      setLogs(getArray(logsData))
-      setAlerts(getArray(alertsData))
-      setEvents(getArray(eventsData))
+      const nextLogs = getArray(logsResult)
+      const nextAlerts = getArray(alertsResult)
+      const nextEvents = getArray(eventsResult)
 
-      setDashboard(
-        dashboardData?.data || dashboardData || {}
-      )
+      setLogs(nextLogs)
+      setAlerts(nextAlerts)
+      setEvents(nextEvents)
 
-      setError('')
+      // Dashboard API data
+      let dashboardInfo = {}
+
+      if (dashboardResult.status === 'fulfilled') {
+        const value = dashboardResult.value
+
+        dashboardInfo =
+          value?.data && !Array.isArray(value.data)
+            ? value.data
+            : value || {}
+      } else {
+        console.warn(
+          'Dashboard API unavailable:',
+          dashboardResult.reason
+        )
+      }
+
+      // Calculate fallback statistics
+      const failedCount = nextLogs.filter(
+        log =>
+          String(log.status || '').toUpperCase() === 'FAILED'
+      ).length
+
+      const criticalCount = nextAlerts.filter(
+        alert =>
+          String(alert.severity || '').toLowerCase() === 'critical'
+      ).length
+
+      setDashboard({
+        ...dashboardInfo,
+        totalLogs: dashboardInfo.totalLogs ?? nextLogs.length,
+        totalAlerts: dashboardInfo.totalAlerts ?? nextAlerts.length,
+        failedConnections:
+          dashboardInfo.failedConnections ?? failedCount,
+        criticalAlerts:
+          dashboardInfo.criticalAlerts ?? criticalCount
+      })
+
+      if (alertsResult.status === 'rejected') {
+        console.warn('Alerts API unavailable:', alertsResult.reason)
+      }
+
+      if (eventsResult.status === 'rejected') {
+        console.warn('Events API unavailable:', eventsResult.reason)
+      }
 
     } catch (err) {
       console.error('Backend Error:', err)
 
       setError(
-        'Backend connection failed. Check backend URL, API routes and CORS settings.'
+        `Unable to load network logs from ${BACKEND_URL}. ${
+          err.message || 'Check backend URL and server status.'
+        }`
       )
-
     } finally {
       setLoading(false)
     }
@@ -193,7 +246,6 @@ function App() {
 
       <div className="table-wrapper">
         <table>
-
           <thead>
             <tr>
               <th>Source IP</th>
@@ -211,7 +263,6 @@ function App() {
             {logs.length > 0 ? (
               logs.map((log, index) => (
                 <tr key={log._id || index}>
-
                   <td>{log.sourceIP || 'N/A'}</td>
                   <td>{log.destinationIP || 'N/A'}</td>
                   <td>{log.sourcePort || 'N/A'}</td>
@@ -220,7 +271,9 @@ function App() {
                   <td>{log.protocol || 'N/A'}</td>
 
                   <td>
-                    <span className={`status ${(log.status || '').toLowerCase()}`}>
+                    <span
+                      className={`status ${(log.status || '').toLowerCase()}`}
+                    >
                       {log.status || 'N/A'}
                     </span>
                   </td>
@@ -228,7 +281,6 @@ function App() {
                   <td>
                     {formatTime(log.timestamp || log.createdAt)}
                   </td>
-
                 </tr>
               ))
             ) : (
@@ -237,7 +289,6 @@ function App() {
               </tr>
             )}
           </tbody>
-
         </table>
       </div>
 
@@ -252,7 +303,6 @@ function App() {
 
       {alerts.length > 0 ? (
         alerts.map((alert, index) => (
-
           <div className="alert" key={alert._id || index}>
 
             <span>⚠</span>
@@ -275,12 +325,13 @@ function App() {
               </p>
             </div>
 
-            <span className={`severity ${(alert.severity || '').toLowerCase()}`}>
+            <span
+              className={`severity ${(alert.severity || '').toLowerCase()}`}
+            >
               {alert.severity || 'N/A'}
             </span>
 
           </div>
-
         ))
       ) : (
         <p>No security alerts detected.</p>
@@ -297,7 +348,6 @@ function App() {
 
       <div className="table-wrapper">
         <table>
-
           <thead>
             <tr>
               <th>Source IP</th>
@@ -311,18 +361,15 @@ function App() {
           <tbody>
             {events.length > 0 ? (
               events.map((event, index) => (
-
                 <tr key={event._id || index}>
                   <td>{event.sourceIP || 'N/A'}</td>
                   <td>{event.eventType || 'N/A'}</td>
                   <td>{event.description || 'N/A'}</td>
                   <td>{event.result || 'N/A'}</td>
-
                   <td>
                     {formatTime(event.timestamp || event.createdAt)}
                   </td>
                 </tr>
-
               ))
             ) : (
               <tr>
@@ -330,7 +377,6 @@ function App() {
               </tr>
             )}
           </tbody>
-
         </table>
       </div>
 
@@ -392,7 +438,9 @@ function App() {
                 <React.Fragment key={state}>
 
                   <div
-                    className={`dfa-state ${isAlert ? 'alert-state' : ''} ${isActive ? 'active-state' : ''}`}
+                    className={`dfa-state ${
+                      isAlert ? 'alert-state' : ''
+                    } ${isActive ? 'active-state' : ''}`}
                   >
 
                     <div className="state-circle">
@@ -429,6 +477,7 @@ function App() {
           </div>
 
           <div className="dfa-info">
+
             <div>
               <span className="legend blue"></span>
               Normal State
@@ -443,6 +492,7 @@ function App() {
               <span className="legend red"></span>
               Alert State
             </div>
+
           </div>
 
           <div className="dfa-message">
@@ -493,7 +543,6 @@ function App() {
 
   // PAGE SELECTION
   const renderPage = () => {
-
     switch (activePage) {
 
       case 'Dashboard':
@@ -524,7 +573,6 @@ function App() {
 
   // MAIN UI
   return (
-
     <div className="app">
 
       <aside className="sidebar">
@@ -534,17 +582,19 @@ function App() {
         <p className="menu-title">MAIN MENU</p>
 
         {navigation.map(item => (
-
           <button
             key={item.name}
             type="button"
-            className={`menu ${activePage === item.name ? 'active' : ''}`}
-            aria-current={activePage === item.name ? 'page' : undefined}
+            className={`menu ${
+              activePage === item.name ? 'active' : ''
+            }`}
+            aria-current={
+              activePage === item.name ? 'page' : undefined
+            }
             onClick={() => handleNavigation(item.name)}
           >
             {item.icon} {item.name}
           </button>
-
         ))}
 
       </aside>
