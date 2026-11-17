@@ -2,11 +2,10 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import './App.css'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+const API = 'http://localhost:5000/api'
 
 function App() {
   const [activePage, setActivePage] = useState('Dashboard')
-
   const [logs, setLogs] = useState([])
   const [alerts, setAlerts] = useState([])
   const [events, setEvents] = useState([])
@@ -21,8 +20,6 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  // NAVIGATION MENU
-
   const navigation = [
     { name: 'Dashboard', icon: '▦' },
     { name: 'Network Logs', icon: '▤' },
@@ -31,30 +28,35 @@ function App() {
     { name: 'Automata Analysis', icon: '⇄' }
   ]
 
-  // PAGE NAVIGATION
-
   const handleNavigation = (page) => {
     setActivePage(page)
-
-    window.scrollTo({
-      top: 0,
-      behavior: 'smooth'
-    })
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  // FETCH BACKEND DATA
-
+  // BACKEND CONNECTION
   const fetchData = useCallback(async () => {
     try {
-      const responses = await Promise.all([
-        fetch(`${API}/logs`),
-        fetch(`${API}/alerts`),
-        fetch(`${API}/dashboard`),
-        fetch(`${API}/events`)
-      ])
+      const endpoints = [
+        'logs',
+        'alerts',
+        'dashboard',
+        'events'
+      ]
 
-      if (responses.some(response => !response.ok)) {
-        throw new Error('API request failed')
+      const responses = await Promise.all(
+        endpoints.map(endpoint =>
+          fetch(`${API}/${endpoint}`)
+        )
+      )
+
+      const failedResponse = responses.find(
+        response => !response.ok
+      )
+
+      if (failedResponse) {
+        throw new Error(
+          `API Error: ${failedResponse.status}`
+        )
       }
 
       const [logsData, alertsData, dashboardData, eventsData] =
@@ -62,35 +64,41 @@ function App() {
           responses.map(response => response.json())
         )
 
-      setLogs(Array.isArray(logsData.data) ? logsData.data : [])
-      setAlerts(Array.isArray(alertsData.data) ? alertsData.data : [])
-      setDashboard(dashboardData.data || {})
-      setEvents(Array.isArray(eventsData.data) ? eventsData.data : [])
+      const getArray = (response) => {
+        if (Array.isArray(response)) return response
+        if (Array.isArray(response?.data)) return response.data
+        return []
+      }
+
+      setLogs(getArray(logsData))
+      setAlerts(getArray(alertsData))
+      setEvents(getArray(eventsData))
+
+      setDashboard(
+        dashboardData?.data || dashboardData || {}
+      )
 
       setError('')
-
     } catch (err) {
       console.error('Backend Error:', err)
-      setError('Backend connection failed. Check port 5000.')
+      setError(
+        'Backend connection failed. Check API routes and port 5000.'
+      )
     } finally {
       setLoading(false)
     }
   }, [])
 
-  // AUTOMATIC DATA REFRESH
-
+  // AUTO REFRESH
   useEffect(() => {
     fetchData()
 
-    const timer = setInterval(() => {
-      fetchData()
-    }, 10000)
+    const timer = setInterval(fetchData, 10000)
 
     return () => clearInterval(timer)
   }, [fetchData])
 
-  // HELPER FUNCTIONS
-
+  // HELPERS
   const uniqueIPs = new Set(
     logs.map(log => log.sourceIP).filter(Boolean)
   ).size
@@ -119,8 +127,6 @@ function App() {
     return 'Network Connection'
   }
 
-  // GET LATEST DFA STATE
-
   const getLatestDFAState = () => {
     const dfaEvent = events.find(event =>
       event.description?.includes('DFA State:')
@@ -135,10 +141,8 @@ function App() {
   }
 
   // DASHBOARD STATISTICS
-
   const renderStats = () => (
     <section className="stats">
-
       <div className="stat-card">
         <p>Total Network Logs</p>
         <h2>{dashboard.totalLogs ?? logs.length}</h2>
@@ -153,7 +157,7 @@ function App() {
 
       <div className="stat-card">
         <p>Security Alerts</p>
-        <h2>{alerts.length}</h2>
+        <h2>{dashboard.totalAlerts ?? alerts.length}</h2>
         <span>Detected alerts</span>
       </div>
 
@@ -162,20 +166,16 @@ function App() {
         <h2>{uniqueIPs}</h2>
         <span>Unique source IPs</span>
       </div>
-
     </section>
   )
 
   // NETWORK LOGS
-
   const renderLogs = () => (
     <section className="panel">
-
       <h2>Network Traffic Logs</h2>
 
       <div className="table-wrapper">
         <table>
-
           <thead>
             <tr>
               <th>Source IP</th>
@@ -191,21 +191,19 @@ function App() {
 
           <tbody>
             {logs.length > 0 ? (
-              logs.map(log => (
-                <tr key={log._id}>
-                  <td>{log.sourceIP}</td>
-                  <td>{log.destinationIP}</td>
-                  <td>{log.sourcePort}</td>
-                  <td>{log.destinationPort}</td>
+              logs.map((log, index) => (
+                <tr key={log._id || index}>
+                  <td>{log.sourceIP || 'N/A'}</td>
+                  <td>{log.destinationIP || 'N/A'}</td>
+                  <td>{log.sourcePort || 'N/A'}</td>
+                  <td>{log.destinationPort || 'N/A'}</td>
                   <td>{getEventName(log)}</td>
-                  <td>{log.protocol}</td>
-
+                  <td>{log.protocol || 'N/A'}</td>
                   <td>
                     <span className={`status ${(log.status || '').toLowerCase()}`}>
-                      {log.status}
+                      {log.status || 'N/A'}
                     </span>
                   </td>
-
                   <td>{formatTime(log.timestamp || log.createdAt)}</td>
                 </tr>
               ))
@@ -215,57 +213,46 @@ function App() {
               </tr>
             )}
           </tbody>
-
         </table>
       </div>
-
     </section>
   )
 
   // SECURITY ALERTS
-
   const renderAlerts = () => (
     <section className="panel">
-
       <h2>Security Alerts Monitoring</h2>
 
       {alerts.length > 0 ? (
-        alerts.map(alert => (
-          <div className="alert" key={alert._id}>
-
+        alerts.map((alert, index) => (
+          <div className="alert" key={alert._id || index}>
             <span>⚠</span>
 
             <div>
-              <strong>{alert.alertType}</strong>
-
-              <p>{alert.description}</p>
-              <p>Source IP: {alert.sourceIP}</p>
-              <p>Status: {alert.status}</p>
+              <strong>{alert.alertType || 'Security Alert'}</strong>
+              <p>{alert.description || 'No description'}</p>
+              <p>Source IP: {alert.sourceIP || 'N/A'}</p>
+              <p>Status: {alert.status || 'N/A'}</p>
             </div>
 
             <span className={`severity ${(alert.severity || '').toLowerCase()}`}>
-              {alert.severity}
+              {alert.severity || 'N/A'}
             </span>
-
           </div>
         ))
       ) : (
         <p>No security alerts detected.</p>
       )}
-
     </section>
   )
 
   // EVENT HISTORY
-
   const renderEvents = () => (
     <section className="panel">
-
       <h2>System Event History</h2>
 
       <div className="table-wrapper">
         <table>
-
           <thead>
             <tr>
               <th>Source IP</th>
@@ -278,12 +265,12 @@ function App() {
 
           <tbody>
             {events.length > 0 ? (
-              events.map(event => (
-                <tr key={event._id}>
-                  <td>{event.sourceIP}</td>
-                  <td>{event.eventType}</td>
-                  <td>{event.description}</td>
-                  <td>{event.result}</td>
+              events.map((event, index) => (
+                <tr key={event._id || index}>
+                  <td>{event.sourceIP || 'N/A'}</td>
+                  <td>{event.eventType || 'N/A'}</td>
+                  <td>{event.description || 'N/A'}</td>
+                  <td>{event.result || 'N/A'}</td>
                   <td>{formatTime(event.timestamp || event.createdAt)}</td>
                 </tr>
               ))
@@ -293,23 +280,18 @@ function App() {
               </tr>
             )}
           </tbody>
-
         </table>
       </div>
-
     </section>
   )
 
   // DFA AUTOMATA ANALYSIS
-
   const renderAutomata = () => {
     const currentState = getLatestDFAState()
 
     return (
       <>
-
         <section className="stats">
-
           <div className="stat-card">
             <p>Current DFA State</p>
             <h2>{currentState}</h2>
@@ -333,11 +315,9 @@ function App() {
             <h2>{alerts.length}</h2>
             <span>Generated alerts</span>
           </div>
-
         </section>
 
         <section className="panel dfa-panel">
-
           <h2>Deterministic Finite Automaton (DFA)</h2>
 
           <p className="dfa-description">
@@ -346,37 +326,28 @@ function App() {
           </p>
 
           <div className="dfa-flow">
-
             {['S0', 'S1', 'S2', 'S3', 'S4', 'S5'].map((state, index) => {
-
               const isActive = currentState === state
               const isAlert = state === 'S5'
 
               return (
                 <React.Fragment key={state}>
-
                   <div
                     className={`dfa-state ${isAlert ? 'alert-state' : ''} ${isActive ? 'active-state' : ''}`}
                   >
-
-                    <div className="state-circle">
-                      {state}
-                    </div>
+                    <div className="state-circle">{state}</div>
 
                     <span className="state-label">
                       {index === 0
                         ? 'Initial'
                         : index === 5
-                        ? 'Alert'
-                        : `${index} Failure${index > 1 ? 's' : ''}`}
+                          ? 'Alert'
+                          : `${index} Failure${index > 1 ? 's' : ''}`}
                     </span>
 
                     {isActive && (
-                      <span className="current-label">
-                        CURRENT
-                      </span>
+                      <span className="current-label">CURRENT</span>
                     )}
-
                   </div>
 
                   {index < 5 && (
@@ -385,80 +356,51 @@ function App() {
                       <strong>→</strong>
                     </div>
                   )}
-
                 </React.Fragment>
               )
             })}
-
           </div>
 
           <div className="dfa-info">
-
-            <div>
-              <span className="legend blue"></span>
-              Normal State
-            </div>
-
-            <div>
-              <span className="legend green"></span>
-              Current State
-            </div>
-
-            <div>
-              <span className="legend red"></span>
-              Alert State
-            </div>
-
+            <div><span className="legend blue"></span> Normal State</div>
+            <div><span className="legend green"></span> Current State</div>
+            <div><span className="legend red"></span> Alert State</div>
           </div>
 
           <div className="dfa-message">
-
             <h3>Current DFA Status</h3>
-
             <p>
               Latest recorded state:
               <strong> {currentState}</strong>
             </p>
-
             <p className="dfa-warning">
               Five consecutive failed connections trigger a
               high-severity security alert.
             </p>
-
           </div>
-
         </section>
 
         <section className="panel">
-
           <h2>Recent DFA Events</h2>
 
           {events.filter(event =>
             event.description?.includes('DFA State:')
-          ).slice(0, 10).map(event => (
-
-            <div className="alert" key={event._id}>
-
+          ).slice(0, 10).map((event, index) => (
+            <div className="alert" key={event._id || index}>
               <div>
-                <strong>{event.sourceIP}</strong>
+                <strong>{event.sourceIP || 'Unknown IP'}</strong>
                 <p>{event.description}</p>
               </div>
-
             </div>
-
           ))}
-
         </section>
-
       </>
     )
   }
 
   // PAGE SELECTION
-
   const renderPage = () => {
     switch (activePage) {
-
       case 'Dashboard':
         return (
           <>
@@ -486,21 +428,13 @@ function App() {
   }
 
   // MAIN UI
-
   return (
-
     <div className="app">
-
-      {/* SIDEBAR */}
-
       <aside className="sidebar">
-
         <h2>🛡️ NetSecure</h2>
-
         <p className="menu-title">MAIN MENU</p>
 
         {navigation.map(item => (
-
           <button
             key={item.name}
             type="button"
@@ -510,60 +444,39 @@ function App() {
           >
             {item.icon} {item.name}
           </button>
-
         ))}
-
       </aside>
 
-      {/* MAIN CONTENT */}
-
       <main className="main-content">
-
         <header className="topbar">
-
           <div>
             <h1>{activePage}</h1>
             <p>Network Log Analysis and Event Correlation</p>
           </div>
 
-          <span className="online">
-            ● System Online
-          </span>
-
+          <span className="online">● System Online</span>
         </header>
 
-        {/* LOADING / ERROR / CONTENT */}
-
         {loading ? (
-
           <section className="panel">
             <h2>Loading data...</h2>
           </section>
-
         ) : error ? (
-
           <section className="panel">
-
-            <p style={{ color: '#ff7777' }}>
-              {error}
-            </p>
+            <p style={{ color: '#ff7777' }}>{error}</p>
 
             <button type="button" onClick={fetchData}>
               Retry Connection
             </button>
-
           </section>
-
-        ) : renderPage()}
-
-        {/* FOOTER */}
+        ) : (
+          renderPage()
+        )}
 
         <footer>
           Network Security Monitoring System | React Dashboard
         </footer>
-
       </main>
-
     </div>
   )
 }
