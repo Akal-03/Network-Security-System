@@ -1,12 +1,8 @@
 
 import React, { useState, useEffect, useCallback } from 'react'
 import './App.css'
-
-// Backend API URL
-const BACKEND_URL = (
-  import.meta.env.VITE_API_URL || 'http://localhost:5000'
-).replace(/\/+$/, '')
-
+// Backend API URL - Render
+const BACKEND_URL = 'https://network-security-system-2-5172.onrender.com'
 const API = `${BACKEND_URL}/api`
 
 function App() {
