@@ -24,6 +24,33 @@ const eventHistorySchema = new mongoose.Schema(
             required: true
         },
 
+        // DFA Execution Details
+        networkLogId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "NetworkLog"
+        },
+
+        dfaInput: {
+            type: String
+        },
+
+        previousState: {
+            type: String
+        },
+
+        currentState: {
+            type: String
+        },
+
+        action: {
+            type: String
+        },
+
+        risk: {
+            type: String,
+            enum: ["Normal", "Warning", "Critical"]
+        },
+
         timestamp: {
             type: Date,
             default: Date.now

@@ -9,6 +9,26 @@ const EventHistory = require("../models/EventHistory");
 const processConnection = require("../automata/failedConnectionTracker");
 const checkRestrictedPort = require("../automata/restrictedPort");
 
+// Get DFA Execution History
+router.get("/dfa-history", async (req, res) => {
+    try {
+        const history = await EventHistory.find({
+            eventType: "DFA_EXECUTION"
+        }).sort({ timestamp: -1 });
+
+        res.status(200).json({
+            success: true,
+            count: history.length,
+            data: history
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
 // Get all network logs
 router.get("/", async (req, res) => {
     try {
@@ -38,12 +58,60 @@ router.post("/", async (req, res) => {
             newLog.status
         );
 
-        // Restricted port detection
-        const portResult = checkRestrictedPort(
-            newLog.destinationPort
-        );
+        // Determine DFA action and risk
+        let action = "No State Change";
+        let risk = "Normal";
 
-        // Save network event history
+        if (newLog.status === "SUCCESS") {
+            action = "Reset State";
+            risk = "Normal";
+        } else if (newLog.status === "FAILED") {
+            const failureActions = {
+                S1: "1st Failure",
+                S2: "2nd Failure",
+                S3: "3rd Failure",
+                S4: "4th Failure",
+                S5: "5th Failure"
+            };
+
+            action = failureActions[dfaResult.currentState] || "Failure";
+
+            if (dfaResult.currentState === "S3" ||
+                dfaResult.currentState === "S4") {
+                risk = "Warning";
+            }
+
+            if (dfaResult.currentState === "S5") {
+                risk = "Critical";
+            }
+        }
+
+        if (dfaResult.alertTriggered) {
+            action = "Critical Alert Triggered";
+        } else if (dfaResult.currentState === "S5") {
+            action = "Alert State Maintained";
+        }
+
+        // Save DFA execution history
+        await EventHistory.create({
+            sourceIP: newLog.sourceIP,
+            eventType: "DFA_EXECUTION",
+            description: `DFA processed ${newLog.status}: ${dfaResult.previousState} to ${dfaResult.currentState}`,
+            result: dfaResult.alertTriggered
+                ? "ALERT"
+                : newLog.status === "FAILED"
+                    ? "FAILED"
+                    : "SUCCESS",
+            networkLogId: newLog._id,
+            dfaInput: newLog.status,
+            previousState: dfaResult.previousState,
+            currentState: dfaResult.currentState,
+            action: action,
+            risk: risk,
+            timestamp: newLog.timestamp || new Date()
+        });
+
+        // Save normal network event history
         await EventHistory.create({
             sourceIP: newLog.sourceIP,
             eventType: "NETWORK_CONNECTION",
@@ -74,6 +142,10 @@ router.post("/", async (req, res) => {
         }
 
         // Restricted Port Security Alert
+        const portResult = checkRestrictedPort(
+            newLog.destinationPort
+        );
+
         if (portResult.restricted) {
             const portAlert = await SecurityAlert.create({
                 sourceIP: newLog.sourceIP,

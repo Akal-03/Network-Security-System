@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import './App.css'
 
-// Backend API URL
 const BACKEND_URL = 'https://network-security-system-2-5172.onrender.com'
 const API = `${BACKEND_URL}/api`
 
@@ -11,6 +10,7 @@ function App() {
   const [logs, setLogs] = useState([])
   const [alerts, setAlerts] = useState([])
   const [events, setEvents] = useState([])
+  const [dfaHistory, setDfaHistory] = useState([])
 
   const [dashboard, setDashboard] = useState({
     totalLogs: 0,
@@ -56,12 +56,14 @@ function App() {
         logsResult,
         alertsResult,
         dashboardResult,
-        eventsResult
+        eventsResult,
+        dfaHistoryResult
       ] = await Promise.allSettled([
         fetchEndpoint('logs'),
         fetchEndpoint('alerts'),
         fetchEndpoint('dashboard'),
-        fetchEndpoint('events')
+        fetchEndpoint('events'),
+        fetchEndpoint('logs/dfa-history')
       ])
 
       if (logsResult.status === 'rejected') {
@@ -83,10 +85,12 @@ function App() {
       const nextLogs = getArray(logsResult)
       const nextAlerts = getArray(alertsResult)
       const nextEvents = getArray(eventsResult)
+      const nextDFAHistory = getArray(dfaHistoryResult)
 
       setLogs(nextLogs)
       setAlerts(nextAlerts)
       setEvents(nextEvents)
+      setDfaHistory(nextDFAHistory)
 
       let dashboardInfo = {}
 
@@ -123,6 +127,10 @@ function App() {
 
       if (eventsResult.status === 'rejected') {
         console.warn('Events API unavailable:', eventsResult.reason)
+      }
+
+      if (dfaHistoryResult.status === 'rejected') {
+        console.warn('DFA History API unavailable:', dfaHistoryResult.reason)
       }
 
     } catch (err) {
@@ -163,7 +171,7 @@ function App() {
   }
 
   const getEventName = (log) => {
-    if (Number(log.destinationPort) === 23) {
+    if ([23, 135, 139, 445].includes(Number(log.destinationPort))) {
       return 'Restricted Port Access'
     }
 
@@ -175,6 +183,10 @@ function App() {
   }
 
   const getLatestDFAState = () => {
+    if (dfaHistory.length > 0) {
+      return dfaHistory[0].currentState || 'S0'
+    }
+
     const dfaEvent = events.find(event =>
       event.description?.includes('DFA State:')
     )
@@ -272,7 +284,7 @@ function App() {
       {alerts.length > 0 ? (
         alerts.map((alert, index) => (
           <div className="alert" key={alert._id || index}>
-            <span>⚠</span>
+            <span>⚠ </span>
 
             <div>
               <strong>{alert.alertType || 'Security Alert'}</strong>
@@ -335,7 +347,6 @@ function App() {
   const renderAutomata = () => {
     const currentState = getLatestDFAState()
 
-    // Transition table data
     const transitionData = [
       { state: 'S0', input: 'Success', next: 'S0', action: 'Reset Counter', status: 'Normal' },
       { state: 'S0', input: 'Failed', next: 'S1', action: '1st Failure', status: 'Normal' },
@@ -439,7 +450,7 @@ function App() {
             </div>
           </div>
 
-          {/* NEW DFA TRANSITION TABLE */}
+          {/* DFA TRANSITION TABLE */}
           <div className="dfa-table-section">
             <h2>Finite Automata Transition Table</h2>
 
@@ -465,6 +476,65 @@ function App() {
                       <td>{row.status}</td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* DFA EXECUTION HISTORY */}
+          <div className="dfa-table-section">
+            <h2>DFA Execution History</h2>
+
+            <p className="dfa-description">
+              Actual network logs processed by the DFA and their state transitions.
+            </p>
+
+            <div className="table-wrapper">
+              <table className="dfa-table">
+                <thead>
+                  <tr>
+                    <th>Source IP</th>
+                    <th>Network Log ID</th>
+                    <th>DFA Input</th>
+                    <th>Previous State</th>
+                    <th>Next State</th>
+                    <th>Action</th>
+                    <th>Risk</th>
+                    <th>Time</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {dfaHistory.length > 0 ? (
+                    dfaHistory.map((item, index) => (
+                      <tr key={item._id || index}>
+                        <td>{item.sourceIP || 'N/A'}</td>
+                        <td>
+                          {item.networkLogId
+                            ? String(item.networkLogId).slice(-8)
+                            : 'N/A'}
+                        </td>
+                        <td>{item.dfaInput || 'N/A'}</td>
+                        <td>{item.previousState || 'N/A'}</td>
+                        <td>{item.currentState || 'N/A'}</td>
+                        <td>{item.action || 'N/A'}</td>
+                        <td>
+                          <span className={`severity ${
+                            (item.risk || '').toLowerCase()
+                          }`}>
+                            {item.risk || 'N/A'}
+                          </span>
+                        </td>
+                        <td>{formatTime(item.timestamp || item.createdAt)}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan="8">
+                        No DFA execution history found. Submit network logs to begin.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
